@@ -1,4 +1,3 @@
-import json
 import requests
 from pycoingecko import CoinGeckoAPI
 import tabulate
@@ -32,7 +31,6 @@ class Wallet_Info():
     DATA_TABLE = []
 
     cg = CoinGeckoAPI()
-
     
     #Secondary "Constructor" Method
     def Wallet_Info(self):
@@ -44,7 +42,7 @@ class Wallet_Info():
         if(self.BALANCE_DIFFERENCE > 0):
             self.BALANCE_DIFFERENCE = "+" + str(self.BALANCE_DIFFERENCE)
 
-        self.createTable()
+        self.DATA_TABLE = self.createTable()
         self.printWalletTransactions()
     
     def getWalletBalance(self):
@@ -156,6 +154,7 @@ class Wallet_Info():
             table_data_entry.append(str(transaction["previous_price"]))
             table_data_entry.append(str(transaction["current_price"]))
             table.append(table_data_entry)
+        return table
 
 
     def printWalletTransactions(self):
