@@ -15,20 +15,25 @@ import csv
 class Wallet_Info():
     
     #Main Constructor
-    def __init__(self, wallet, currency="usd"):
+    def __init__(self, wallet, currency, cli_args):
+        self.cli_args = cli_args
         self.wallet = wallet
         self.currency = str(currency).lower()
+        print(self.cli_args)
         self.Wallet_Info() #Call Secondary "Constructor"
 
-    #Statistical Variables
+    #Data
     DATA_TRANSACTIONS = []
+    DATA_TABLE = []
+
+    #Statistical Variables
     CURRENT_VALUE_PLANET = 0.0
     CURRENT_BALANCE = 0.0
     CURRENT_BALANCE_VALUE = 0.0
     PREVIOUS_BALANCE_VALUE = 0.0
     BALANCE_DIFFERENCE = 0.0
     CURRENCY_SYMBOL = ""
-    DATA_TABLE = []
+    
 
     cg = CoinGeckoAPI()
     
@@ -38,10 +43,7 @@ class Wallet_Info():
         self.CURRENT_VALUE_PLANET = float(self.getCurrentPrice(1))
         self.CURRENT_BALANCE = self.getWalletBalance()
         self.getWalletTransactions()
-        self.BALANCE_DIFFERENCE = self.CURRENT_BALANCE_VALUE - self.PREVIOUS_BALANCE_VALUE
-        if(self.BALANCE_DIFFERENCE > 0):
-            self.BALANCE_DIFFERENCE = "+" + str(self.BALANCE_DIFFERENCE)
-
+        self.createDataTableJson()
         self.DATA_TABLE = self.createTable()
         self.printWalletTransactions()
     
@@ -90,25 +92,22 @@ class Wallet_Info():
             data["timestamp"] = int(transaction["round-time"])
             data["current_price"] = float(data["amount"]) * self.CURRENT_VALUE_PLANET
             data["previous_price"] = self.getPriceFromDate(data["amount"], data["timestamp"])
-            
-
-            difference = self.getPriceDifference(data["current_price"], data["previous_price"])
-            if(difference > 0):
-                data["price_difference"] = "+" + str(difference)
-            else:
-                data["price_difference"] = str(difference)
+            data["price_difference"] = self.getPriceDifference(data["current_price"], data["previous_price"])
             
             self.DATA_TRANSACTIONS.append(data)
+
+            #Update Stuff
+            self.CURRENT_BALANCE_VALUE += float(data["current_price"])
+            if(data["previous_price"] == None):
+                self.PREVIOUS_BALANCE_VALUE += 0
+            else:
+                self.PREVIOUS_BALANCE_VALUE += float(data["previous_price"])
+
             index += 1
             print(f"Progress - {index}/{len(transactions)} Transactions")
             sleep(0.1)
-
-        for y in self.DATA_TRANSACTIONS:
-            self.CURRENT_BALANCE_VALUE += float(y["current_price"])
-            if(y["previous_price"] == None):
-                self.PREVIOUS_BALANCE_VALUE += 0
-            else:
-                self.PREVIOUS_BALANCE_VALUE += float(y["previous_price"])
+        
+        self.BALANCE_DIFFERENCE = self.CURRENT_BALANCE_VALUE - self.PREVIOUS_BALANCE_VALUE
 
     def getCurrentPrice(self, amount):
         value = self.cg.get_price(ids='planetwatch', vs_currencies=self.currency)["planetwatch"][self.currency]
@@ -117,7 +116,7 @@ class Wallet_Info():
     def getPriceFromDate(self, amount, date):
         while(True):
             try:
-                json_body = self.cg.get_coin_market_chart_range_by_id(id="planetwatch", vs_currency=self.currency, from_timestamp=(date - 1000), to_timestamp=(date + 1000))
+                json_body = self.cg.get_coin_market_chart_range_by_id(id="planetwatch", vs_currency=self.currency, from_timestamp=(date - 1500), to_timestamp=(date + 3600))
                 break
             except:
                 print("Hit Ratelimit. Waiting 15s To Fetch Data Again!")
@@ -139,10 +138,21 @@ class Wallet_Info():
             price_now = 0.0
         return price_now - previous_price
 
-    
+
+    def createDataTableJson(self):
+        self.DATA_TRANSACTIONS = {
+            "Wallet": self.wallet,
+            "Balance_Tokens": self.CURRENT_BALANCE,
+            "Per_Token_Fiat": self.CURRENT_VALUE_PLANET,
+            "Current_Value_Fiat": self.CURRENT_BALANCE_VALUE,
+            "Previous_Value_Fiat": self.PREVIOUS_BALANCE_VALUE,
+            "Difference_Fiat": self.BALANCE_DIFFERENCE,
+            "Data": self.DATA_TRANSACTIONS
+        }
+
     def createTable(self):
         table = [["Amount","Date", f"Initial Value {self.CURRENCY_SYMBOL}", f"Current Value {self.CURRENCY_SYMBOL}"]]
-        for transaction in self.DATA_TRANSACTIONS:
+        for transaction in self.DATA_TRANSACTIONS['Data']:
             table_data_entry = []
             table_data_entry.append(str(transaction["amount"]))
             utc_time = datetime.utcfromtimestamp(int(transaction["timestamp"]))
@@ -156,7 +166,6 @@ class Wallet_Info():
             table.append(table_data_entry)
         return table
 
-
     def printWalletTransactions(self):
         print(f"++++++++++ Wallet: {self.wallet}")
         print(f"Current PlanetWatch Token Price: {self.CURRENT_VALUE_PLANET} {self.CURRENCY_SYMBOL}")
@@ -164,7 +173,7 @@ class Wallet_Info():
         print(f"    Current Balance: {self.CURRENT_BALANCE} Tokens")
         print(f"    Current Value: {self.CURRENT_BALANCE_VALUE} {self.CURRENCY_SYMBOL}")
         print(f"    Previous Value: {self.PREVIOUS_BALANCE_VALUE} {self.CURRENCY_SYMBOL}")
-        print(f"    Difference: {str(self.BALANCE_DIFFERENCE)}")
+        print(f"    Difference: {str(self.BALANCE_DIFFERENCE)} {self.CURRENCY_SYMBOL}")
         print("")
 
         
@@ -178,4 +187,3 @@ class Wallet_Info():
             writer = csv.writer(f)
             writer.writerow(header)
             writer.writerows(content)
-
