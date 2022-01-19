@@ -1,3 +1,4 @@
+from ast import arg
 import requests
 from pycoingecko import CoinGeckoAPI
 import tabulate
@@ -5,6 +6,9 @@ from datetime import datetime
 from algosdk.v2client import indexer
 from time import sleep
 import csv
+import base64
+import json
+from click import progressbar as pg
 
 
 #TODO Matplotlib for faster calculations
@@ -16,10 +20,9 @@ class Wallet_Info():
     
     #Main Constructor
     def __init__(self, wallet, currency, cli_args):
-        self.cli_args = cli_args
+        self.cli_args = cli_args['args']
         self.wallet = wallet
         self.currency = str(currency).lower()
-        print(self.cli_args)
         self.Wallet_Info() #Call Secondary "Constructor"
 
     #Data
@@ -81,18 +84,43 @@ class Wallet_Info():
                 transactions = transactions + transaction_page
                 nexttoken = response["next-token"]
 
+        
+        if(self.cli_args['verbose']):
+            self.getWalletTransactionsLoop(transactions)
+        else:
+            with pg(transactions) as items:
+                self.getWalletTransactionsLoop(items)
+
+    
+    def getWalletTransactionsLoop(self, transactions):
         index = 0
         for transaction in transactions:
             data = {}
-
-            data["amount"] = float(transaction["asset-transfer-transaction"]["amount"] / 1000000)
-            if(int(data["amount"]) == 0):
+            if(transaction["asset-transfer-transaction"]["amount"] == 0):
                 continue
+
+            if(self.cli_args['get'] in ['rewards', 'devices']):
+                if transaction["sender"] not in [
+                    "ZW3ISEHZUHPO7OZGMKLKIIMKVICOUDRCERI454I3DB2BH52HGLSO67W754",
+                    "X2W76H7A57BNGV6UQNMYQHCFOK4BI4DE6AG7V7BIGIYSNGCPBO44JXRMHA",
+                    ]:
+                    continue
+
+            if(transaction['sender'] == self.wallet):
+                data["amount"] = float(transaction["asset-transfer-transaction"]["amount"] / 1000000) * -1.0
+            else:
+                data["amount"] = float(transaction["asset-transfer-transaction"]["amount"] / 1000000)
             data["tx"] = str(transaction["id"])
             data["timestamp"] = int(transaction["round-time"])
             data["current_price"] = float(data["amount"]) * self.CURRENT_VALUE_PLANET
             data["previous_price"] = self.getPriceFromDate(data["amount"], data["timestamp"])
-            data["price_difference"] = self.getPriceDifference(data["current_price"], data["previous_price"])
+            if(transaction['sender'] == self.wallet):
+                data["price_difference"] = self.getPriceDifference(data["current_price"], data["previous_price"]) * -1.0
+            else:
+                data["price_difference"] = self.getPriceDifference(data["current_price"], data["previous_price"])
+
+            if(self.cli_args['get'] == 'devices'):
+                data['device'] = self.getDeviceID(transaction)
             
             self.DATA_TRANSACTIONS.append(data)
 
@@ -104,10 +132,12 @@ class Wallet_Info():
                 self.PREVIOUS_BALANCE_VALUE += float(data["previous_price"])
 
             index += 1
-            print(f"Progress - {index}/{len(transactions)} Transactions")
+            if(self.cli_args['verbose']):
+                print(f"Progress - {index}/{len(transactions)} Transactions")
             sleep(0.1)
         
         self.BALANCE_DIFFERENCE = self.CURRENT_BALANCE_VALUE - self.PREVIOUS_BALANCE_VALUE
+
 
     def getCurrentPrice(self, amount):
         value = self.cg.get_price(ids='planetwatch', vs_currencies=self.currency)["planetwatch"][self.currency]
@@ -138,6 +168,12 @@ class Wallet_Info():
             price_now = 0.0
         return price_now - previous_price
 
+    def getDeviceID(self, transaction):
+        base_64_note = transaction['note']
+        note_data = (base64.b64decode((base_64_note).encode('utf-8'))).decode('utf-8')
+        note_data = json.loads(note_data)
+        return note_data['deviceId']
+
 
     def createDataTableJson(self):
         self.DATA_TRANSACTIONS = {
@@ -151,9 +187,11 @@ class Wallet_Info():
         }
 
     def createTable(self):
-        table = [["Amount","Date", f"Initial Value {self.CURRENCY_SYMBOL}", f"Current Value {self.CURRENCY_SYMBOL}"]]
+        table = [["Nr.", "Amount","Date", f"Initial Value {self.CURRENCY_SYMBOL}", f"Current Value {self.CURRENCY_SYMBOL}", f"Difference {self.CURRENCY_SYMBOL}"]]
+        index = 1
         for transaction in self.DATA_TRANSACTIONS['Data']:
             table_data_entry = []
+            table_data_entry.append(index)
             table_data_entry.append(str(transaction["amount"]))
             utc_time = datetime.utcfromtimestamp(int(transaction["timestamp"]))
             if(transaction["previous_price"] == None):
@@ -163,7 +201,9 @@ class Wallet_Info():
             table_data_entry.append(str(utc_time))
             table_data_entry.append(str(transaction["previous_price"]))
             table_data_entry.append(str(transaction["current_price"]))
+            table_data_entry.append(str(transaction["price_difference"]))
             table.append(table_data_entry)
+            index += 1
         return table
 
     def printWalletTransactions(self):
@@ -177,12 +217,13 @@ class Wallet_Info():
         print("")
 
         
-        print(tabulate.tabulate(self.DATA_TABLE, headers='firstrow', numalign="right", showindex="always"))
+        print(tabulate.tabulate(self.DATA_TABLE, headers='firstrow', numalign="right"))
 
 
     def saveToCSV(self):
         header = self.DATA_TABLE[0]
-        content = self.DATA_TABLE.pop(0)
+        content = self.DATA_TABLE
+        content.pop(0)
         with open(f'{self.wallet}.csv', 'w', encoding='UTF8', newline='') as f:
             writer = csv.writer(f)
             writer.writerow(header)

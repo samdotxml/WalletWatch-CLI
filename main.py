@@ -1,5 +1,3 @@
-from ast import arg
-from urllib import request
 import click
 import sys
 import core
