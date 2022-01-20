@@ -13,7 +13,6 @@ from click import progressbar as pg
 
 #TODO Matplotlib for faster calculations
 #TODO Faster Iterations
-#TODO Check Wallets With Big Transactions
 
 
 class Wallet_Info():
@@ -49,6 +48,7 @@ class Wallet_Info():
         self.createDataTableJson()
         self.DATA_TABLE = self.createTable()
         self.printWalletTransactions()
+        self.exportData()
     
     def getWalletBalance(self):
         url = f"https://algoindexer.algoexplorerapi.io/v2/accounts/{self.wallet}?include-all=true"
@@ -111,6 +111,7 @@ class Wallet_Info():
             else:
                 data["amount"] = float(transaction["asset-transfer-transaction"]["amount"] / 1000000)
             data["tx"] = str(transaction["id"])
+            data["sensor"] = self.getDeviceID(transaction)
             data["timestamp"] = int(transaction["round-time"])
             data["current_price"] = float(data["amount"]) * self.CURRENT_VALUE_PLANET
             data["previous_price"] = self.getPriceFromDate(data["amount"], data["timestamp"])
@@ -169,10 +170,13 @@ class Wallet_Info():
         return price_now - previous_price
 
     def getDeviceID(self, transaction):
-        base_64_note = transaction['note']
-        note_data = (base64.b64decode((base_64_note).encode('utf-8'))).decode('utf-8')
-        note_data = json.loads(note_data)
-        return note_data['deviceId']
+        if('note' in transaction):
+            base_64_note = transaction['note']
+            note_data = (base64.b64decode((base_64_note).encode('utf-8'))).decode('utf-8')
+            note_data = json.loads(note_data)
+            return note_data['deviceId']
+        else:
+            return None
 
 
     def createDataTableJson(self):
@@ -187,12 +191,20 @@ class Wallet_Info():
         }
 
     def createTable(self):
-        table = [["Nr.", "Amount","Date", f"Initial Value {self.CURRENCY_SYMBOL}", f"Current Value {self.CURRENCY_SYMBOL}", f"Difference {self.CURRENCY_SYMBOL}"]]
+        table = [[
+            "Nr",
+            "Amount",
+            "Sensor"
+            "Date",
+            f"Initial Value {self.CURRENCY_SYMBOL}",
+            f"Current Value {self.CURRENCY_SYMBOL}",
+            f"Difference {self.CURRENCY_SYMBOL}"]]
         index = 1
         for transaction in self.DATA_TRANSACTIONS['Data']:
             table_data_entry = []
             table_data_entry.append(index)
             table_data_entry.append(str(transaction["amount"]))
+            table_data_entry.append(str(transaction["sensor"]))
             utc_time = datetime.utcfromtimestamp(int(transaction["timestamp"]))
             if(transaction["previous_price"] == None):
                 utc_time = utc_time.strftime("%Y-%m-%d %H:%M:%S (UTC)")
@@ -220,11 +232,29 @@ class Wallet_Info():
         print(tabulate.tabulate(self.DATA_TABLE, headers='firstrow', numalign="right"))
 
 
+
     def saveToCSV(self):
         header = self.DATA_TABLE[0]
         content = self.DATA_TABLE
         content.pop(0)
-        with open(f'{self.wallet}.csv', 'w', encoding='UTF8', newline='') as f:
+        PATH = self.cli_args['csv']
+        with open(f'{PATH}/{self.wallet}.csv', 'w', encoding='UTF8', newline='') as f:
             writer = csv.writer(f)
             writer.writerow(header)
             writer.writerows(content)
+            f.close()
+
+    def exportData(self):
+        if(self.cli_args['export'] != None):
+            PATH = self.cli_args['export']
+            if(self.cli_args['format'] == 'json'):
+                with open(f'{PATH}/{self.wallet}.json', 'w') as f:
+                    json.dump(self.DATA_TRANSACTIONS, f)
+                    f.close()
+            else:
+                with open(f'{PATH}/{self.wallet}.txt', 'w') as f:
+                    f.write(tabulate.tabulate(self.DATA_TABLE, headers='firstrow', numalign="right"))
+                    f.close()
+
+        if(self.cli_args['csv'] != None):
+            self.saveToCSV()
