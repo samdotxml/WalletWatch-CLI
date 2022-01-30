@@ -1,4 +1,3 @@
-from ast import arg
 import requests
 from pycoingecko import CoinGeckoAPI
 import tabulate
@@ -27,12 +26,14 @@ class Wallet_Info():
     #Data
     DATA_TRANSACTIONS = []
     DATA_TABLE = []
+    SENSORS = {}
 
     #Statistical Variables
     CURRENT_VALUE_PLANET = 0.0
     CURRENT_BALANCE = 0.0
     CURRENT_BALANCE_VALUE = 0.0
-    PREVIOUS_BALANCE_VALUE = 0.0
+    OVERALL_BALANCE_VALUE = 0.0
+    OVERALL_PREVIOUS_BALANCE_VALUE = 0.0
     BALANCE_DIFFERENCE = 0.0
     CURRENCY_SYMBOL = ""
     
@@ -44,6 +45,7 @@ class Wallet_Info():
         self.CURRENCY_SYMBOL = f"[{str(self.currency).upper()}]"
         self.CURRENT_VALUE_PLANET = float(self.getCurrentPrice(1))
         self.CURRENT_BALANCE = self.getWalletBalance()
+        self.CURRENT_BALANCE_VALUE = self.CURRENT_BALANCE * self.CURRENT_VALUE_PLANET
         self.getWalletTransactions()
         self.createDataTableJson()
         self.DATA_TABLE = self.createTable()
@@ -93,6 +95,11 @@ class Wallet_Info():
 
     
     def getWalletTransactionsLoop(self, transactions):
+        if(self.cli_args['filter'] != None):
+            sensors = str(self.cli_args['filter']).split(',')
+            for x in sensors:
+                self.SENSORS[x] = 0.0
+
         index = 0
         for transaction in transactions:
             data = {}
@@ -110,6 +117,14 @@ class Wallet_Info():
                 data["amount"] = float(transaction["asset-transfer-transaction"]["amount"] / 1000000) * -1.0
             else:
                 data["amount"] = float(transaction["asset-transfer-transaction"]["amount"] / 1000000)
+            
+            data['device'] = self.getDeviceID(transaction)
+            if(self.cli_args['filter'] != None):
+                if(data['device'] not in sensors):
+                    continue
+                else:
+                    self.SENSORS[data['device']] += data["amount"]
+            
             data["tx"] = str(transaction["id"])
             data["sensor"] = self.getDeviceID(transaction)
             data["timestamp"] = int(transaction["round-time"])
@@ -119,25 +134,23 @@ class Wallet_Info():
                 data["price_difference"] = self.getPriceDifference(data["current_price"], data["previous_price"]) * -1.0
             else:
                 data["price_difference"] = self.getPriceDifference(data["current_price"], data["previous_price"])
-
-            if(self.cli_args['get'] == 'devices'):
-                data['device'] = self.getDeviceID(transaction)
             
             self.DATA_TRANSACTIONS.append(data)
 
             #Update Stuff
-            self.CURRENT_BALANCE_VALUE += float(data["current_price"])
+            self.OVERALL_BALANCE_VALUE += float(data["current_price"])
             if(data["previous_price"] == None):
-                self.PREVIOUS_BALANCE_VALUE += 0
+                self.OVERALL_PREVIOUS_BALANCE_VALUE += 0
             else:
-                self.PREVIOUS_BALANCE_VALUE += float(data["previous_price"])
+                self.OVERALL_PREVIOUS_BALANCE_VALUE += float(data["previous_price"])
 
             index += 1
             if(self.cli_args['verbose']):
                 print(f"Progress - {index}/{len(transactions)} Transactions")
             sleep(0.1)
         
-        self.BALANCE_DIFFERENCE = self.CURRENT_BALANCE_VALUE - self.PREVIOUS_BALANCE_VALUE
+        self.BALANCE_DIFFERENCE = self.OVERALL_BALANCE_VALUE - self.OVERALL_PREVIOUS_BALANCE_VALUE
+        print(self.SENSORS)
 
 
     def getCurrentPrice(self, amount):
@@ -171,10 +184,13 @@ class Wallet_Info():
 
     def getDeviceID(self, transaction):
         if('note' in transaction):
-            base_64_note = transaction['note']
-            note_data = (base64.b64decode((base_64_note).encode('utf-8'))).decode('utf-8')
-            note_data = json.loads(note_data)
-            return note_data['deviceId']
+            try:
+                base_64_note = transaction['note']
+                note_data = (base64.b64decode((base_64_note).encode('utf-8'))).decode('utf-8')
+                note_data = json.loads(note_data)
+                return note_data['deviceId']
+            except:
+                return None
         else:
             return None
 
@@ -184,8 +200,9 @@ class Wallet_Info():
             "Wallet": self.wallet,
             "Balance_Tokens": self.CURRENT_BALANCE,
             "Per_Token_Fiat": self.CURRENT_VALUE_PLANET,
-            "Current_Value_Fiat": self.CURRENT_BALANCE_VALUE,
-            "Previous_Value_Fiat": self.PREVIOUS_BALANCE_VALUE,
+            "Balance_Value_Fiat": self.CURRENT_BALANCE_VALUE,
+            "Overall_Value_Fiat": self.OVERALL_BALANCE_VALUE,
+            "Previous_Value_Fiat": self.OVERALL_PREVIOUS_BALANCE_VALUE,
             "Difference_Fiat": self.BALANCE_DIFFERENCE,
             "Data": self.DATA_TRANSACTIONS
         }
@@ -194,7 +211,7 @@ class Wallet_Info():
         table = [[
             "Nr",
             "Amount",
-            "Sensor"
+            "Sensor",
             "Date",
             f"Initial Value {self.CURRENCY_SYMBOL}",
             f"Current Value {self.CURRENCY_SYMBOL}",
@@ -219,19 +236,27 @@ class Wallet_Info():
         return table
 
     def printWalletTransactions(self):
-        print(f"++++++++++ Wallet: {self.wallet}")
-        print(f"Current PlanetWatch Token Price: {self.CURRENT_VALUE_PLANET} {self.CURRENCY_SYMBOL}")
-        print("Statistics:")
-        print(f"    Current Balance: {self.CURRENT_BALANCE} Tokens")
-        print(f"    Current Value: {self.CURRENT_BALANCE_VALUE} {self.CURRENCY_SYMBOL}")
-        print(f"    Previous Value: {self.PREVIOUS_BALANCE_VALUE} {self.CURRENCY_SYMBOL}")
-        print(f"    Difference: {str(self.BALANCE_DIFFERENCE)} {self.CURRENCY_SYMBOL}")
-        print("")
+        if(not self.cli_args['silent']):
+            if(self.cli_args['format'] == 'table'):
+                print(f"++++++++++ Wallet: {self.wallet}")
+                print(f"Current PlanetWatch Token Price: {self.CURRENT_VALUE_PLANET} {self.CURRENCY_SYMBOL}")
+                print("Statistics:")
+                print(f"    Current Balance: {self.CURRENT_BALANCE} Tokens")
+                print(f"    Current Value: {self.CURRENT_BALANCE_VALUE} {self.CURRENCY_SYMBOL}")
+                print(f"    Overall Value: {self.OVERALL_BALANCE_VALUE} {self.CURRENCY_SYMBOL}")
+                print(f"    Previous Value: {self.OVERALL_PREVIOUS_BALANCE_VALUE} {self.CURRENCY_SYMBOL}")
+                print(f"    Difference: {str(self.BALANCE_DIFFERENCE)} {self.CURRENCY_SYMBOL}")
+                print("")
 
-        
-        print(tabulate.tabulate(self.DATA_TABLE, headers='firstrow', numalign="right"))
-
-
+                
+                print(tabulate.tabulate(self.DATA_TABLE, headers='firstrow', numalign="right"))
+            else:
+                if(self.cli_args['prettyjson']):
+                    print(json.dumps(self.DATA_TRANSACTIONS, indent=4))
+                else:
+                    print(self.DATA_TRANSACTIONS)
+        else:
+            print("Done")
 
     def saveToCSV(self):
         header = self.DATA_TABLE[0]
@@ -239,10 +264,11 @@ class Wallet_Info():
         content.pop(0)
         PATH = self.cli_args['csv']
         with open(f'{PATH}/{self.wallet}.csv', 'w', encoding='UTF8', newline='') as f:
-            writer = csv.writer(f)
+            writer = csv.writer(f, dialect='excel')
             writer.writerow(header)
             writer.writerows(content)
             f.close()
+        print("Exported To CSV-File.")
 
     def exportData(self):
         if(self.cli_args['export'] != None):
@@ -255,6 +281,19 @@ class Wallet_Info():
                 with open(f'{PATH}/{self.wallet}.txt', 'w') as f:
                     f.write(tabulate.tabulate(self.DATA_TABLE, headers='firstrow', numalign="right"))
                     f.close()
+            print("Exported To File.")
 
         if(self.cli_args['csv'] != None):
             self.saveToCSV()
+
+
+class Sensor():
+    def __init__(self, name):
+        self.name = name
+        self.tokens_rewarded = 0.0
+
+    def getTokens(self):
+        return self.tokens_rewarded
+
+    def addTokens(self, amount):
+        self.tokens_rewarded += amount

@@ -1,3 +1,4 @@
+from ast import arg
 import click
 import sys
 import core
@@ -10,14 +11,18 @@ import core
 @click.option('--format', type=click.Choice(['json','table'], case_sensitive=False), default='table')
 @click.option('--export')
 @click.option('--csv')
+@click.option('--filter')
 @click.option('--verbose', is_flag=True)
 @click.option('--silent', is_flag=True)
 @click.option('--round', is_flag=True)
+@click.option('--prettyjson', is_flag=True)
 def main(**args):
     args = locals()
     checkWalletLength(args['args']['wallet'])
     checkConflicts(args)
     checkCurrency(args['args']['currency'])
+    if(args['args']['filter'] != None):
+        args['args']['filter'] = str(args['args']['filter']).upper()
     object = core.Wallet_Info(args['args']['wallet'], args['args']['currency'], args)
     
 
